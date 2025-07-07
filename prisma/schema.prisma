@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 👤 USER NEXTAUTH COMPATIBLE
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?   // uniquement si login via formulaire
+  image         String?
+  linkingAuthorizedAt   DateTime? // 🆕 Nouveau champ
+  watchedTutorial Boolean @default(false) // 🆕 Nouveau champ pour le tutoriel
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // 🔐 NEXTAUTH RELATIONS
+  accounts      Account[]
+  sessions      Session[]
+  
+  // 📝 NOS DONNÉES MÉTIER
+  todos         Todo[]
+  historyTodos  HistoryTodo[] // Todos archivés
+  categories    Category[]
+  weekTypes     WeekType[] // 🆕 Semaines types
+
+  @@map("users")
+}
+
+// 🔐 TABLES NEXTAUTH OBLIGATOIRES
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
+}
+
+// 📝 NOS MODÈLES MÉTIER
+model Todo {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  completed   Boolean   @default(false)
+  priority    Priority  @default(NORMAL)
+  type        TodoType  @default(PERSONAL) // 🆕 ENUM POUR UPGRADE
+  
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  dueDate     DateTime?
+  
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("todos")
+}
+
+model Category {
+  id        String       @id @default(cuid())
+  name      String
+  color     String       // Obligatoire !
+  emoji     String?
+  type      CategoryType @default(PERSONAL) // 🆕 ENUM POUR UPGRADE
+  
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  todos     Todo[]
+  historyTodos HistoryTodo[] // Relation avec les todos archivés
+  weekTypeTodos WeekTypeTodo[] // 🆕 Relation avec les todos des semaines types
+  
+  createdAt DateTime     @default(now())
+  
+  @@unique([userId, name])
+  @@map("categories")
+}
+
+// 🎯 ENUMS POUR UPGRADE FUTUR
+enum TodoType {
+  PERSONAL  // 📝 Todo personnel (actuel)
+  SHARED    // 👥 Todo partagé (futur)
+}
+
+enum CategoryType {
+  PERSONAL  // 🎨 Catégorie personnelle (actuel)  
+  SHARED    // 👥 Catégorie partagée (futur)
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+model HistoryTodo {
+  id          String    @id @default(cuid())
+  title       String    // 🔐 Chiffré côté application
+  description String?   // 🔐 Chiffré côté application
+  completed   Boolean   @default(false)
+  priority    Priority  @default(NORMAL)
+  type        TodoType  @default(PERSONAL)
+  
+  // 🆕 Données de catégorie intégrées pour préserver l'historique
+  categoryName String?  // Nom de la catégorie au moment de l'archivage
+  categoryColor String? // Couleur de la catégorie au moment de l'archivage
+  categoryEmoji String? // Emoji de la catégorie au moment de l'archivage
+  
+  // Relation optionnelle avec la catégorie (peut être null si supprimée)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  dueDate     DateTime?
+  archivedAt  DateTime  @default(now()) // Date d'archivage
+  weekKey     String    // Clé de la semaine (YYYY-MM-DD du lundi)
+  
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("history_todos")
+}
+
+// 🆕 MODÈLE POUR LES SEMAINES TYPES
+model WeekType {
+  id          String    @id @default(cuid())
+  name        String    // Nom de la semaine type
+  description String?   // Description optionnelle
+  isDefault   Boolean   @default(false) // Semaine type par défaut
+  
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  todos       WeekTypeTodo[] // Todos de la semaine type
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([userId, name])
+  @@map("week_types")
+}
+
+// 🆕 MODÈLE POUR LES TODOS DES SEMAINES TYPES
+model WeekTypeTodo {
+  id          String    @id @default(cuid())
+  title       String    // 🔐 Chiffré côté application
+  description String?   // 🔐 Chiffré côté application
+  completed   Boolean   @default(false) // (optionnel, si tu veux gérer l'état dans le template)
+  priority    Priority  @default(NORMAL)
+  type        TodoType  @default(PERSONAL)
+
+  // Catégorie (référence)
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+
+  // Heure de la tâche (optionnelle)
+  dueDate     DateTime?
+
+  // Jour de la semaine (0=Dimanche, 1=Lundi, ..., 6=Samedi)
+  dayOfWeek   Int
+
+  weekTypeId  String
+  weekType    WeekType  @relation(fields: [weekTypeId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("week_type_todos")
+} 
